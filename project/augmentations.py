@@ -145,14 +145,13 @@ def get_train_transforms():
     return Compose([
         RandomResizedCrop(config.IMAGE_SIZE, scale=config.AUG_CROP_SCALE),
         RandomHorizontalFlip(p=config.AUG_FLIP_PROB),
-        # Simple augmentations: horizontal flip + light brightness/contrast
         ColorJitter(
             brightness=config.AUG_BRIGHTNESS,
-            contrast=config.AUG_CONTRAST,  # Re-enabled light contrast
-            saturation=0.0,    # Disabled
-            hue=0.0,          # Disabled
+            contrast=config.AUG_CONTRAST,
+            saturation=config.AUG_SATURATION,
+            hue=config.AUG_HUE,
         ),
-        # Heavy augmentations disabled (blur, etc.)
+        GaussianBlur(p=config.AUG_BLUR_PROB, radius_range=(0.5, 2.0)),
         ToTensor(),
         Normalize(),
     ])

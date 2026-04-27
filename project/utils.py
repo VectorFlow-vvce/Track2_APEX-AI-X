@@ -53,12 +53,26 @@ def load_checkpoint(model: nn.Module, path: str, optimizer=None, device=config.D
 
 
 def find_best_checkpoint(ckpt_dir: str = config.CKPT_DIR) -> str | None:
-    """Return path of checkpoint with highest mIoU in filename."""
-    paths = [f for f in os.listdir(ckpt_dir) if f.endswith(".pth")]
-    if not paths:
+    """Return path of checkpoint with highest mIoU in filename.
+    Falls back to best_model.pth if no miou-tagged checkpoints exist."""
+    import glob
+    pth_files = glob.glob(os.path.join(ckpt_dir, "*.pth"))
+    if not pth_files:
         return None
-    best = max(paths, key=lambda f: float(f.split("miou")[-1].replace(".pth", "")))
-    return os.path.join(ckpt_dir, best)
+    valid = []
+    for f in pth_files:
+        try:
+            if "miou" in os.path.basename(f):
+                miou = float(os.path.basename(f).split("miou")[-1].replace(".pth", ""))
+                valid.append((f, miou))
+        except (ValueError, IndexError):
+            continue
+    if valid:
+        return max(valid, key=lambda x: x[1])[0]
+    fallback = os.path.join(ckpt_dir, "best_model.pth")
+    if os.path.isfile(fallback):
+        return fallback
+    return pth_files[0]
 
 
 # ─── LR Scheduler ─────────────────────────────────────────────────────────────

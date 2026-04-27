@@ -1,15 +1,14 @@
 """
 train.py - Main training loop.
 
-Just run:
-    python train.py
-
-All settings come from config.py — no arguments required.
-GPU is used automatically if available, otherwise falls back to CPU.
+Run:
+    py train.py
+    py train.py --resume outputs/checkpoints/best_model.pth
 """
 
 import os
 import sys
+import argparse
 import torch
 
 import config
@@ -25,10 +24,6 @@ from utils       import (
 # ─── Debug / preflight check ──────────────────────────────────────────────────
 
 def preflight_check(train_loader, val_loader):
-    """
-    Print dataset sizes and one sample's shape before training starts.
-    Catches data problems early so you don't waste time.
-    """
     print("\n" + "─" * 60)
     print("  PRE-FLIGHT CHECK")
     print("─" * 60)
@@ -37,7 +32,6 @@ def preflight_check(train_loader, val_loader):
     print(f"  Validation batches : {len(val_loader)}")
     print(f"  Validation samples : {len(val_loader.dataset)}")
 
-    # Grab one batch and inspect shapes
     try:
         images, masks, fnames = next(iter(train_loader))
         print(f"\n  Sample batch (train):")
@@ -47,13 +41,10 @@ def preflight_check(train_loader, val_loader):
               f"unique={masks.unique().tolist()}")
         print(f"    first file   : {fnames[0]}")
 
-        # Warn if mask max exceeds NUM_CLASSES
         if int(masks.max()) >= config.NUM_CLASSES and int(masks.max()) != config.IGNORE_INDEX:
             print(
                 f"\n  ⚠ WARNING: mask contains class ID {int(masks.max())} but "
-                f"NUM_CLASSES={config.NUM_CLASSES}.\n"
-                f"    Update CLASS_NAMES / NUM_CLASSES in config.py to cover all IDs,\n"
-                f"    or set IGNORE_INDEX={int(masks.max())} to skip unknown pixels."
+                f"NUM_CLASSES={config.NUM_CLASSES}."
             )
     except Exception as e:
         print(f"\n  ✗ Could not load a sample batch: {e}")
@@ -92,7 +83,6 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, epoch):
 
         total_loss += loss.item()
 
-        # Print every LOG_INTERVAL batches (or always if dataset is small)
         interval = min(config.LOG_INTERVAL, max(1, n_batches // 4))
         if (i + 1) % interval == 0 or (i + 1) == n_batches:
             pct = 100 * (i + 1) / n_batches
@@ -127,7 +117,7 @@ def validate(model, loader, criterion):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
-def main():
+def main(args):
     set_seed(config.SEED)
 
     # ── Banner ────────────────────────────────────────────────────────────────
@@ -142,18 +132,11 @@ def main():
     print(f"  Batch size  : {config.BATCH_SIZE}")
     print(f"  LR          : {config.LEARNING_RATE}")
     print(f"  Scheduler   : {config.LR_SCHEDULER}")
-    print(f"  Train imgs  : {config.TRAIN_IMAGE_DIR}")
-    print(f"  Train masks : {config.TRAIN_MASK_DIR}")
-    print(f"  Val imgs    : {config.VAL_IMAGE_DIR}")
-    print(f"  Val masks   : {config.VAL_MASK_DIR}")
     print(f"{'='*60}\n")
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    # debug=True prints shape info for the first sample (set False to silence)
     train_loader = get_train_loader(debug=True)
     val_loader   = get_val_loader(debug=True)
-
-    # Pre-flight: print counts + sample shapes, warn on class-ID mismatches
     preflight_check(train_loader, val_loader)
 
     # ── Model / Loss / Optimizer ──────────────────────────────────────────────
@@ -168,20 +151,25 @@ def main():
     scaler    = get_scaler()
     logger    = TrainingLogger()
 
-    # ── Fresh training from pretrained weights ────────────────────────────────
-    print(f"\n[Training] Starting fresh from pretrained SegFormer weights")
-    print(f"[Training] NO checkpoint resume - clean start for recovery")
-    
+    # ── Resume or fresh start ─────────────────────────────────────────────────
     start_epoch = 1
-    best_miou = 0.0
-    best_epoch = 0
-    best_ckpt = os.path.join(config.CKPT_DIR, "best_model.pth")
-    
-    # Early stopping variables
-    patience = 2
-    target_miou = 0.56
+    best_miou   = 0.0
+    best_epoch  = 0
+    best_ckpt   = os.path.join(config.CKPT_DIR, "best_model.pth")
+
+    if args.resume and os.path.isfile(args.resume):
+        print(f"\n[Training] Resuming from checkpoint: {args.resume}")
+        loaded_epoch, loaded_miou = load_checkpoint(model, args.resume, optimizer)
+        start_epoch = loaded_epoch + 1
+        best_miou   = loaded_miou
+        best_epoch  = loaded_epoch
+        print(f"[Training] Resuming at epoch {start_epoch}, best mIoU so far: {best_miou:.4f}")
+    else:
+        print(f"\n[Training] Starting fresh from pretrained SegFormer weights")
+
+    # Early stopping: patience only, no target cap
+    patience = 15
     no_improvement_count = 0
-    prev_miou = 0.0
 
     # ── Training loop ─────────────────────────────────────────────────────────
     for epoch in range(start_epoch, config.NUM_EPOCHS + 1):
@@ -198,36 +186,25 @@ def main():
         logger.print_epoch(epoch, train_loss, val_loss, val_miou, current_lr)
         scheduler.step()
 
-        # Save checkpoint every epoch (never overwrite)
+        # Save checkpoint every epoch (never overwrite previous)
         epoch_ckpt = os.path.join(config.CKPT_DIR, f"epoch_{epoch}_miou{val_miou:.4f}.pth")
         save_checkpoint(model, optimizer, epoch, val_miou, epoch_ckpt)
-        
-        # Check for improvement
-        improvement = val_miou - prev_miou
-        
+
         # Save best model when mIoU improves
         if val_miou > best_miou:
-            best_miou = val_miou
+            best_miou  = val_miou
             best_epoch = epoch
             save_checkpoint(model, optimizer, epoch, val_miou, best_ckpt)
-            print(f"  ★★★ NEW BEST mIoU: {best_miou:.4f} (improvement: +{improvement:.4f}) ★★★")
+            print(f"  ★★★ NEW BEST mIoU: {best_miou:.4f} ★★★")
             no_improvement_count = 0
         else:
-            print(f"  → mIoU: {val_miou:.4f} (change: {improvement:+.4f})")
             no_improvement_count += 1
-            print(f"  ⚠ No improvement for {no_improvement_count}/{patience} epochs")
+            print(f"  → No improvement ({no_improvement_count}/{patience})")
 
-        # Early stopping checks
-        if val_miou >= target_miou:
-            print(f"\n  🎯 TARGET REACHED: mIoU {val_miou:.4f} >= {target_miou:.4f}")
-            print(f"  Stopping early - goal achieved!")
-            break
-            
+        # Patience-based early stopping only
         if no_improvement_count >= patience:
             print(f"\n  🛑 Early stopping: No improvement for {patience} consecutive epochs")
             break
-
-        prev_miou = val_miou
 
     # ── Final summary ─────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
@@ -242,35 +219,28 @@ def main():
     print(f"\n{'─'*60}")
     print(f"  FINAL PER-CLASS IoU ANALYSIS")
     print(f"{'─'*60}")
-    
-    # Get final validation results
+
     _, _, final_results = validate(model, val_loader, criterion)
-    
-    # Print per-class IoU with focus on weak classes
-    weak_classes = ["ground_clutter", "logs", "rocks", "dry_bushes"]
-    class_ious = final_results.get("class_iou", [])
-    
+    iou_per_class = final_results.get("iou_per_class", [])
+    weak_classes  = ["ground_clutter", "logs", "rocks", "dry_bushes"]
+
     print(f"  {'Class':<15} {'IoU':<8} {'Weight':<8} {'Status'}")
     print(f"  {'-'*15} {'-'*8} {'-'*8} {'-'*10}")
-    
+
     for i, (class_name, weight) in enumerate(zip(config.CLASS_NAMES, config.CLASS_WEIGHTS)):
-        if i < len(class_ious):
-            iou = class_ious[i]
+        if i < len(iou_per_class):
+            iou = iou_per_class[i]
             status = "🎯 WEAK" if class_name in weak_classes else "✓"
             print(f"  {class_name:<15} {iou:<8.4f} {weight:<8} {status}")
-    
-    # Highlight weak class improvements
-    print(f"\n  🎯 WEAK CLASS FOCUS:")
-    for i, class_name in enumerate(config.CLASS_NAMES):
-        if class_name in weak_classes and i < len(class_ious):
-            iou = class_ious[i]
-            weight = config.CLASS_WEIGHTS[i]
-            print(f"     {class_name}: IoU={iou:.4f} (weight={weight})")
-    
+
     print(f"{'='*60}\n")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Train segmentation model")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to checkpoint to resume from")
+    args = parser.parse_args()
+    main(args)
