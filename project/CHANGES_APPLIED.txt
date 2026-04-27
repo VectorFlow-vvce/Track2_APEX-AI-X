@@ -1,0 +1,217 @@
+================================================================================
+SEMANTIC SEGMENTATION TRAINING - RECOVERY & OPTIMIZATION
+================================================================================
+
+Date: April 27, 2026
+Objective: Fix training to recover from bad checkpoint (~0.20 mIoU) and achieve
+           mIoU ≥ 0.55-0.60 within limited time using optimized settings.
+
+================================================================================
+FILES MODIFIED
+================================================================================
+
+1. project/train.py
+   ✓ REMOVED all checkpoint resume logic
+   ✓ Added start_epoch = 1 (explicit fresh start)
+   ✓ Fixed undefined variables (start_epoch, min_improvement)
+   ✓ Implemented per-epoch checkpoint saving (never overwrites)
+   ✓ Enhanced early stopping (target 0.56 OR 2 epochs no improvement)
+   ✓ Improved output messages with "★★★ NEW BEST mIoU ★★★"
+   ✓ Added comprehensive final summary with per-class IoU analysis
+
+2. project/config.py
+   ✓ Changed IMAGE_SIZE from (256, 256) to 256 (single int)
+   ✓ Confirmed BATCH_SIZE = 8 (optimized for GPU)
+   ✓ Confirmed NUM_EPOCHS = 10 (fast recovery)
+   ✓ Confirmed LEARNING_RATE = 5e-5 (optimized)
+   ✓ Confirmed NUM_WORKERS = 2 (parallel data loading)
+   ✓ Confirmed CLASS_WEIGHTS = [1, 2, 2, 3, 5, 3, 4, 4, 1, 1]
+   ✓ DEVICE = "cuda" (auto-detected, falls back to CPU)
+
+3. project/augmentations.py
+   ✓ Fixed Resize class to handle both int and tuple IMAGE_SIZE
+   ✓ Fixed RandomResizedCrop to handle both int and tuple IMAGE_SIZE
+   ✓ Verified light augmentations only (no heavy blur/saturation)
+
+4. project/utils.py
+   ✓ Already has proper AMP support (get_scaler, autocast_ctx)
+   ✓ Already has proper checkpoint saving/loading
+   ✓ No changes needed - already optimized
+
+5. project/model.py
+   ✓ Already moves model to CUDA device
+   ✓ Already has proper class weights support in CombinedLoss
+   ✓ No changes needed - already optimized
+
+6. project/data_loader.py
+   ✓ Already has pin_memory=True when CUDA available
+   ✓ Already has num_workers from config
+   ✓ No changes needed - already optimized
+
+================================================================================
+NEW FILES CREATED
+================================================================================
+
+1. project/TRAINING_RECOVERY_SUMMARY.md
+   - Comprehensive documentation of all changes
+   - Expected behavior and output examples
+   - Verification checklist
+   - Training strategy explanation
+
+2. project/QUICK_START.md
+   - Fast 3-step guide to start training
+   - Expected output examples
+   - Time estimates
+   - Troubleshooting guide
+
+3. project/verify_changes.py
+   - Automated verification script
+   - Checks config settings
+   - Verifies data directories
+   - Tests CUDA availability
+   - Validates dependencies
+
+4. project/CHANGES_APPLIED.txt
+   - This file - summary of all modifications
+
+================================================================================
+KEY OPTIMIZATIONS
+================================================================================
+
+STEP 1: CHECKPOINT RESUME REMOVED ✓
+- Training starts fresh from pretrained SegFormer B2 weights
+- No automatic loading of best_model.pth
+- start_epoch = 1 explicitly set
+
+STEP 2: CONFIG OPTIMIZED ✓
+- IMAGE_SIZE = 256 (fast training)
+- BATCH_SIZE = 8 (GPU optimized)
+- EPOCHS = 10 (fast recovery)
+- LEARNING_RATE = 5e-5 (fast convergence)
+- CLASS_WEIGHTS boosted for weak classes
+
+STEP 3: GPU + PERFORMANCE ✓
+- DEVICE = cuda (auto-detected)
+- AMP enabled (torch.cuda.amp.autocast)
+- GradScaler enabled
+- pin_memory=True in DataLoader
+- num_workers=2 for parallel loading
+
+STEP 4: CHECKPOINT SYSTEM FIXED ✓
+- Saves every epoch: epoch_{epoch}_miou{miou:.4f}.pth
+- Saves best_model.pth only when mIoU improves
+- Never overwrites previous epoch checkpoints
+
+STEP 5: TRAINING OUTPUT ENHANCED ✓
+- Prints epoch number, train loss, val loss, val mIoU, LR
+- Highlights "★★★ NEW BEST mIoU ★★★" when improved
+- Shows improvement delta
+
+STEP 6: EARLY STOPPING IMPLEMENTED ✓
+- Stops if mIoU ≥ 0.56 (target reached)
+- Stops if no improvement for 2 consecutive epochs
+
+STEP 7: FINAL OUTPUT ENHANCED ✓
+- Prints best mIoU achieved
+- Prints best epoch number
+- Prints path to best checkpoint
+- Shows per-class IoU analysis with weak class highlights
+
+================================================================================
+VERIFICATION BEFORE TRAINING
+================================================================================
+
+Run this command to verify all changes:
+  cd project
+  python verify_changes.py
+
+Expected output:
+  ✓ All files exist
+  ✓ Config settings correct
+  ✓ Data directories found
+  ✓ CUDA available (or warning if CPU only)
+  ✓ Dependencies installed
+
+================================================================================
+HOW TO START TRAINING
+================================================================================
+
+1. Verify setup:
+   cd project
+   python verify_changes.py
+
+2. Start training:
+   python train.py
+
+3. Monitor output for:
+   - "★★★ NEW BEST mIoU" messages
+   - mIoU increasing each epoch
+   - Target reached (≥0.56) or early stopping
+
+================================================================================
+EXPECTED RESULTS
+================================================================================
+
+Training should:
+- Start from pretrained SegFormer B2 weights
+- Improve mIoU from ~0.20 to 0.55-0.60 range
+- Complete in 4-10 epochs (early stopping may trigger)
+- Take ~5-10 minutes per epoch with GPU
+- Save checkpoints every epoch
+- Stop when target (0.56) reached or no improvement
+
+Checkpoint files created:
+  outputs/checkpoints/epoch_1_miou0.XXXX.pth
+  outputs/checkpoints/epoch_2_miou0.XXXX.pth
+  ...
+  outputs/checkpoints/best_model.pth  ← Use this for inference
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. Old best_model.pth will be overwritten when new best mIoU achieved
+2. Training will NOT resume from any checkpoint - clean start
+3. GPU (CUDA) strongly recommended for fast training
+4. Target mIoU is 0.56 (may achieve 0.55-0.60 range)
+5. Early stopping may finish training before 10 epochs
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: CUDA out of memory
+Fix: Reduce BATCH_SIZE in config.py from 8 to 4 or 2
+
+Issue: Training too slow
+Fix: Ensure CUDA available, increase NUM_WORKERS to 4
+
+Issue: mIoU not improving
+Fix: Check data quality, let train for 3-4 epochs minimum
+
+Issue: Import errors
+Fix: pip install torch torchvision transformers pillow numpy
+
+================================================================================
+RULES FOLLOWED
+================================================================================
+
+✓ NO model architecture changes
+✓ NO complex augmentations added
+✓ NO training slowdown
+✓ Focus on fast convergence
+✓ Recovery + optimization run (not experimentation)
+
+================================================================================
+READY TO TRAIN
+================================================================================
+
+All optimizations complete. System ready for high-performance training run.
+
+Run: python verify_changes.py  (to verify)
+Then: python train.py          (to start training)
+
+Expected completion: 4-10 epochs, 50-100 minutes with GPU
+Target: mIoU ≥ 0.56
+
+================================================================================

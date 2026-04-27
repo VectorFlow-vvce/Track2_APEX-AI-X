@@ -1,0 +1,54 @@
+================================================================================
+⚠️  IMPORTANT: GPU NOT CONFIGURED - TRAINING WILL BE VERY SLOW
+================================================================================
+
+PROBLEM:
+  You have NVIDIA GPU but PyTorch is CPU-only version
+  Training will take 30-60 min per epoch instead of 5-10 min
+
+SOLUTION:
+  Install PyTorch with CUDA support (takes 5-10 minutes)
+
+================================================================================
+🚀 QUICK FIX - RUN THIS NOW:
+================================================================================
+
+Open terminal in project folder and run:
+
+    install_pytorch_gpu.bat
+
+OR manually:
+
+    pip uninstall torch torchvision torchaudio
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+Then verify:
+
+    py setup_gpu.py
+
+================================================================================
+AFTER INSTALLATION:
+================================================================================
+
+1. Close and reopen terminal
+2. Run: py setup_gpu.py  (should show "✓ READY FOR GPU TRAINING")
+3. Run: py train.py      (should show "device: cuda")
+
+================================================================================
+PERFORMANCE:
+================================================================================
+
+Without GPU (current):  30-60 minutes per epoch  ❌
+With GPU (after fix):   5-10 minutes per epoch   ✅
+
+Total training time:
+  CPU:  5-10 hours  ❌
+  GPU:  50-100 minutes  ✅
+
+================================================================================
+
+Install GPU support now to save hours of training time!
+
+Run: install_pytorch_gpu.bat
+
+================================================================================
